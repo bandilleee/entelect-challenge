@@ -5,8 +5,8 @@ Update at every checkpoint and before any long operation, then commit.
 
 ## Status
 
-Phase 0 complete. Problem extracted into `harness/problem-spec.md`. Repo live on
-GitHub. **No simulator exists yet. No submission has been made yet.**
+Simulator, scorer, validator and a fitted Level 1 schedule all exist and are
+committed. **No submission has been made yet — that is the next action.**
 
 The problem: submit a planting schedule, organisers run their simulator for 500
 ticks, only the final tick is scored. We never see intermediate state. All the
