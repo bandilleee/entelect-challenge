@@ -115,3 +115,59 @@ Only the tail matters for a grid-filling schedule, so a candidate does not need
 a 500-tick rollout to evaluate. Seed the grid directly in its placed state and
 simulate the last ~15 ticks. That is roughly a 30x cut in rollout cost without
 leaving Python, and it should be done before any thought of porting to C++.
+
+## 2026-09-12 — Simulator calibration against the three Level 1 results
+
+`python experiments/calibrate_l1.py` — 24 rule configs x 3 known schedules.
+
+**Best config found:**
+
+    competition = 'hybrid'        spread_clock = 'since_maturity'
+    spread_ring_only = False      drain_from_maturity = False
+
+**Result: partial. Directionally right, quantitatively wrong.**
+
+| schedule | predicted G/R/S/L/O | actual | H pred / actual |
+|---|---|---|---|
+| S1 407-498 | 252/429/286/482/351 | 341/409/260/563/227 | 0.4604 / 0.4531 |
+| S2 401-490 | 148/142/787/113/581 | 40/108/894/141/617 | 0.3819 / 0.3400 |
+| S3 410-499 | 176/205/699/167/519 | (no counts) | 0.4163 / 0.3731 |
+
+It **does** reproduce the S2 collapse qualitatively — Sunflower and Oak run away
+while Grass, Rose and Lavender are crushed, in the right rank order. Total H
+error 0.0924 across the three.
+
+**Where it fails: S1.** The engine moved 10 cells; the simulator moves 170. It
+predicts Oak 227 -> 351 and Sunflower 260 -> 286, where reality showed *zero*
+growth for both. So the model is still too permissive about spread when a
+species has a small, well-enclosed territory. This is the same "territory size
+drives expansion" effect we inferred from the scores, and the simulator does not
+capture it.
+
+**Standing status: the simulator is a RANKING tool, not a predictor.** Good
+enough to say schedule A beats schedule B; not good enough to predict a score.
+Do not repeat the mistake of shipping a change on its unvalidated advice.
+
+## 2026-09-12 — Level 2 schedule, simulated
+
+Same best config, on `submissions/level2.json`:
+
+| unlock_mode | species alive | C | coverage | H | implied score |
+|---|---|---|---|---|---|
+| latching | 6 | 3102 | 0.4431 | 0.2621 | 93M |
+| live | 4 | 3003 | 0.4290 | 0.3275 | 115M |
+
+**The coverage number is the useful part: ~0.44.** Spread really does fill a
+large part of the grid, well above the 0.283 that phase B places by hand. That
+converts the coverage question from a guess into an estimate.
+
+**The species number is NOT trustworthy.** `FinalState.unlocked_plant_types`
+comes back empty, so the unlock tracking agent E was writing when it was killed
+is unfinished. The trace shows 8 species on the grid at tick 200, collapsing to
+3 by tick 400 as the scaffolding starves, then 6 after phase B — but with unlock
+tracking broken we cannot tell whether phase B placements were rejected as
+locked or whether the sim simply never registered the unlocks.
+
+**Conclusion: submit and read the log.** The evaluation log reports
+`unlocked_plant_types` and full `plant_counts` directly. One submission settles
+in seconds what the broken simulator cannot, and submissions are unlimited.
