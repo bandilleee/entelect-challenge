@@ -58,7 +58,7 @@ PLACEMENT_ORDER = [12, 2, 6, 5, 1]
 # is a tick it can spread, so the whole schedule is pushed as late as the
 # 20-per-tick cap allows.
 FIRST_TICK = 401
-LAST_TICK = 498
+LAST_TICK = 499
 
 PER_TICK_CAP = 20
 
@@ -128,11 +128,25 @@ def tick_windows(sizes):
             f"{sum(sizes.values())} cells need {total} ticks; span "
             f"{FIRST_TICK}..{LAST_TICK} holds {LAST_TICK - FIRST_TICK + 1}"
         )
-    # Packed against the START of the span. The scoring parameters are now known
-    # to be alpha = k = 1 exactly, so the longevity term is linear in lifespan:
-    # every tick a cell is planted earlier is worth the same again. Nutrients
-    # stop us going earlier than FIRST_TICK, so we sit right on that bound.
-    windows, tick = {}, FIRST_TICK
+    # Packed hard against the END of the span, and this is the single most
+    # important line in the file.
+    #
+    # Placements land exactly as written, but any tick left between the LAST
+    # placement and scoring is a tick in which mature plants spread and
+    # overwrite lower-ranked neighbours. Two submissions measured it directly:
+    #
+    #     last placement 498 -> 2-tick tail ->  10 cells moved -> 274,709,453
+    #     last placement 490 -> 10-tick tail -> 791 cells moved -> 209,170,416
+    #
+    # The redistribution is strictly rank-ordered: Sunflower (rank 4) and Oak
+    # (rank 10) gained 534 and 257 cells, while Lavender, Rose Bush and Grass
+    # (ranks 2, 2, 1) lost 219, 252 and 320. Entropy collapsed 0.4687 -> 0.3400.
+    #
+    # Starting eight ticks earlier buys about 2.6M of longevity and costs about
+    # 74M of entropy. So the tail is minimised first and lifespan takes what is
+    # left: finish at LAST_TICK and work backwards.
+    start = LAST_TICK + 1 - total
+    windows, tick = {}, start
     for species in PLACEMENT_ORDER:
         windows[species] = (tick, tick + needed[species] - 1)
         tick += needed[species]
