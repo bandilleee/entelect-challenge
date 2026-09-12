@@ -1,0 +1,54 @@
+name: solve-verify-score
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Compile C++ (if any)
+        run: |
+          shopt -s nullglob
+          files=(src/*.cpp)
+          if [ ${#files[@]} -gt 0 ]; then
+            g++ -O2 -std=c++20 -o /tmp/solver "${files[@]}"
+            echo "compiled ok"
+          else
+            echo "no C++ sources, skipping"
+          fi
+
+      - name: Unlock-closure invariant
+        run: python experiments/closure.py 'resources-docs/1(1).json' | head -20
+
+      - name: Solve, verify, score
+        run: ./benchmarks/run.sh | tee /tmp/scores.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          echo '### Scores' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/scores.txt >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo 'no output' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload answers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: answers
+          path: /tmp/ans_*.json
+          if-no-files-found: ignore
