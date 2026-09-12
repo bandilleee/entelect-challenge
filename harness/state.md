@@ -5,89 +5,112 @@ Update at every checkpoint and before any long operation, then commit.
 
 ## Status
 
-Simulator, scorer, validator and a fitted Level 1 schedule all exist and are
-committed. **No submission has been made yet � that is the next action.**
+**Level 1 is done and banked at 274,709,453.** Work has moved to Level 2.
 
-The problem: submit a planting schedule, organisers run their simulator for 500
-ticks, only the final tick is scored. We never see intermediate state. All the
-risk is in reconstructing their simulator, not in the search.
+Level 2's world file is `resources-docs/2 (1).json` -- **note the SPACE in the
+filename**, where Level 1's `1(1).json` has none. Quote every path.
 
-## Key facts already established (do not re-derive)
+## Scoring is fully solved -- stop treating these as unknown
 
-- **Level 1 has exactly 5 usable species** — Grass(1), Rose Bush(2), Dwarf
-  Sunflower(5), Lavender(6), Oak Tree(12). Verified by computing the unlock
-  closure under maximally optimistic assumptions; it is a fixed point at 5. Every
-  first-tier unlock needs an animal or a world event, and Level 1 has
-  `animals_enabled: false` and zero event commands. **There is no unlock puzzle
-  in Level 1.** Do not spend time hunting for one.
-- **`N` in `log_N` is 31** (the whole catalogue), stated explicitly in the PDF.
-  So Level 1 entropy is capped at `log_31(5) = 0.4687`.
-- **Grid 50x50 = 2500 cells; only 1800 are plantable** (dirt 1440 + mud 360).
-  Clay (360) is unusable — no starter has soil 2 in `preferred_soil`. Water 180,
-  stone 160. Max coverage = **0.72**.
-- Seasons: Summer@100, Autumn@200, Winter@300, Spring@400. No events. The
-  platform's own Level 1 blurb ("Seasons, no animals, no weather conditions")
-  independently confirms this.
-- **Grass has the LOWEST invasiveness rank (1) of all 31 plants; Oak has 10.**
-  If rank governs pushing into occupied cells, Grass displaces nothing and
-  **Oak is the monoculture risk**, not Grass. Test this first — it inverts the
-  containment plan.
-- **Nutrients cap plant life at ~100 ticks in a virgin cell.** Scoring reads the
-  final tick, so anything planted before ~tick 400 is likely dead at scoring
-  time. This is the central trap.
+From Level 1 submission 1's evaluation log:
+
+    final = 0.8 * H * (C / C_max)  +  0.2 * (1 / C_max) * SUM(l / T)
+    alpha = 1      k = 1      N = 31      leaderboard = final * 1e9
+    H = -SUM p_i log_31(p_i),  so H = log_31(S) when S species are equal
 
 ## Best scores
 
-| Level | Local sim score | Verified | Submitted | Leaderboard |
-|-------|-----------------|----------|-----------|-------------|
-| L1 | — | — | — | — |
+| Level | Best submitted | Notes |
+|-------|----------------|-------|
+| L1 | **274,709,453** | submission 1; two later attempts scored worse |
+| L2 | not yet submitted | 28 of 31 species reachable, main ceiling ~680M |
 
-Nothing measured yet.
+### Level 1 -- three real results, and the two theories they killed
 
-## Submission mechanics (confirmed off the platform)
+| # | placed G/R/S/L/O | ticks | tail | final H | score |
+|---|---|---|---|---|---|
+| 1 | 351/409/260/553/227 | 407-498 | 2 | 0.4531 | **274,709,453** |
+| 2 | 360/360/360/360/360 | 401-490 | 10 | 0.3400 | 209,170,416 |
+| 3 | 360/360/360/360/360 | 410-499 | 1 | ~0.373 | 228,005,785 |
 
-- Per-level upload; Level 1 needs **both a ZIP (source) and a JSON (answer)**.
-  `make_submit.py --level 1` already produces exactly that pair.
-- **"You can upload multiple versions"** — no per-day cap, only the deadline.
-  Treat submissions as **effectively unlimited**, so cheap diagnostic
-  submissions are worth firing.
-- **Platform rule 6: solutions must be deterministic and reproducible.**
-  `solve.py` must emit a byte-identical answer every run, on their machine too.
-  Seed all RNG; make search **iteration-bounded, never wall-clock-bounded**;
-  sort before iterating any set of strings (`PYTHONHASHSEED` is not stable
-  across processes). This is an architectural constraint on the optimiser.
-- Still unknown: does the leaderboard take best-or-latest, and does the platform
-  return a score immediately on upload? Confirm both on submission #1.
+- Placements land exactly as written.
+- The **tail** -- ticks between the last placement and tick 500 -- is where the
+  damage happens. A 2-tick tail moved 10 cells; a 10-tick tail moved 791.
+- Redistribution is **strictly ordered by `invasiveness_rank`**, which settles
+  the competition ambiguity in the problem statement: rank governs overwriting.
+- **Territory size drives expansion.** Submission 1 is the only one that held its
+  entropy, and the thing it uniquely had was small territories for the two
+  aggressive species (Oak 227, Sunflower 260, against 360 each in the others).
+- Chasing the entropy ceiling with equal seeding cost 65M across two
+  submissions. **Do not submit a schedule change the simulator cannot first
+  reproduce on all three rows above.**
+
+## Level 2 -- why it is a different problem
+
+| | L1 | L2 |
+|---|---|---|
+| grid | 2500 | **7000** (70x100) |
+| animals | off | **on** |
+| events | none | **Rain @ 250** |
+| usable cells | 1800 | **6135** |
+| coverage ceiling | 0.72 | **0.8764** |
+| species reachable | 5 | **28** |
+| main term ceiling | 270M | **680M** |
+
+**Species count dominates everything.** 5 -> 10 species is worth about +141M,
+while every placement lever in all of Level 1 was worth 10-40M.
+
+**Manual placement can no longer fill the grid**: 1980 usable placements against
+6135 cells reaches coverage 0.286 against a 0.8764 ceiling. Spread was optional
+in Level 1 and is mandatory here, which is exactly why the simulator has to be
+calibrated before its output is trusted.
 
 ## In flight
 
-Nothing. Awaiting go-ahead on the sub-agent briefs (A simulator, B scorer +
-validator, C calibration). D optimiser is blocked until A and B exist.
+Two sub-agents, disjoint files:
+
+- **E -- simulator + calibration.** `src/sim.py`, `src/world.py`,
+  `src/animals.py`, `tests/test_sim.py`, `tests/test_animals.py`,
+  `experiments/calibrate_l1.py`. Fitting `Rules` to reproduce all three Level 1
+  results, then adding animals, events and unlock tracking.
+- **F -- Level 2 planner.** `solve.py`, `src/plan.py`, `verify.py`,
+  `tests/test_plan.py`, `experiments/plan_l2.py`. Two-phase schedule:
+  scaffolding to walk the unlock graph, then the scoring garden ending at 499.
 
 ## Next action
 
-1. Brief sub-agent **B** (scorer + validator) and sub-agent **A** (simulator) in
-   parallel — they touch different files (`src/score.py`+`verify.py` vs
-   `src/sim.py`).
-2. Build the **probe submission** by hand — it does not need the simulator. A
-   balanced block of the five species planted across ticks ~400-490, ~360 cells
-   each, Oak quarantined in its own corner. Submit it to calibrate alpha, k and
-   the leaderboard constant.
-3. Then sub-agent **C** runs the calibration experiments listed as open questions
-   in `harness/problem-spec.md`.
+1. Review both agents' measured numbers. **Reject anything without one.**
+2. Regression-check Level 1: `solve.py` must still emit the 1800-placement,
+   ticks 407-498 schedule that scored 274,709,453.
+3. Submit Level 2 and read `unlocked_plant_types` and `plant_counts` from the
+   evaluation log -- that answers the open question below for free.
+
+## The open question that shapes Level 2
+
+**Do unlocks latch, or are they re-evaluated live?** The condition wording reads
+like a live predicate. The current plan assumes **latching**, kept as a one-line
+constant so it can be flipped.
+
+- Latching: scaffolding can be disposable, die early, and the late garden still
+  places everything.
+- Live: prerequisite coverage must survive to tick 500 and competes with the
+  garden for space. Much harder, and the schedule changes shape entirely.
+
+The submission log's `unlocked_plant_types` answers it directly. A hedge is
+already in place: phase B places species in unlock-dependency order.
 
 ## Known traps
 
-- `solve.py` / `verify.py` still hold the *practice* reference implementation
-  from the old scaffold. Both must be replaced together — a stale verifier will
-  happily pass a wrong answer. `benchmarks/cases/` is now empty by design, so CI
-  currently runs zero cases and passes trivially.
+- **`resources-docs/2 (1).json` has a space; `1(1).json` does not.** Quote paths.
+- The evaluation log is the most informative thing we get -- `plant_counts` for
+  all 31 species, plus `entropy`, `main_score`, `longevity_score` and
+  `unlocked_plant_types`. Always ask for it after a submission.
+- `classifications.json` spells the group `"Shallowroot Species"` while
+  `animals.json` requires `"Shallow-root Species"`. Strict matching means
+  Rhizorends never appears and Bloodbloom is blocked (28 species); normalising
+  gives 29. Worth about 20M.
+- Crystal Cactus (Drought) and Phoenix Bloom (Ash Eclipse) need events Level 2
+  does not schedule. Permanently blocked; do not plan around them.
 - `make_submit.py` zips from `git archive`; uncommitted work is silently absent.
-- `resources-docs/1(1).json` and `problem-statement(1).pdf` contain parentheses.
-  **Quote every shell path** or they break.
-- Never hard-code the level filename. Level 2's world file drops into
-  `resources-docs/` later; read the path from an argument.
-- The PDF contradicts itself on the submission key: worked example says
-  `plant_index`, schema block says `index`. We emit `plant_index`.
-- The PDF contradicts itself on competition: invasiveness rank vs "last spreader
-  wins". Unresolved until tested.
+- Our simulator failed to predict all three Level 1 results. Until
+  `experiments/calibrate_l1.py` reproduces them, treat its output as a hint.
