@@ -263,3 +263,111 @@ error is not.
 probe the real scorer with a simple valid schedule early, and only then optimise
 a compactly parameterised schedule (region boundaries and per-species timing
 offsets) against the simulator.
+
+
+---
+
+# Level 2 — `resources-docs/2 (1).json`
+
+**Note the filename: `2 (1).json` has a SPACE in it**, where Level 1's `1(1).json`
+does not. Quote every path.
+
+| | Level 1 | Level 2 |
+|---|---|---|
+| grid | 50x50 = 2500 | **70x100 = 7000** |
+| ticks | 500 | 500 |
+| `animals_enabled` | false | **true** |
+| events | none | **Rain @ tick 250** |
+| usable cells (soil 0/1) | 1800 | **6135** |
+| coverage ceiling | 0.7200 | **0.8764** |
+| species reachable | 5 | **28** |
+| H ceiling = log_31(S) | 0.4687 | **0.9704** |
+| main term ceiling | 0.2700 | **0.6804** |
+| as leaderboard points | 270M | **680M** |
+
+Terrain: 5890 dirt, 245 mud, 166 clay, 577+18 water, 104 stone.
+
+## Species count is the whole game now
+
+With scoring pinned at `alpha = k = 1` and `H = log_31(S)`, the marginal value of
+one more species at Level 2 coverage is enormous, and front-loaded:
+
+| species | main term | leaderboard | gain |
+|---|---|---|---|
+| 5 | 0.3286 | 328M | — |
+| 10 | 0.4701 | 470M | **+141M** |
+| 15 | 0.5529 | 553M | +83M |
+| 20 | 0.6117 | 612M | +59M |
+| 28 | 0.6804 | 680M | +69M |
+
+For comparison, every placement-tuning lever in the whole of Level 1 was worth
+10-40M. **Getting from 5 species to 10 is worth more than all of Level 1.**
+
+## Reachability: 28 of 31 (optimistic upper bound)
+
+`python experiments/closure2.py 'resources-docs/2 (1).json'`
+
+8 of 10 animals become present, which is what opens the graph. The chain starts
+from the same five starters: Grass coverage and Rose Bush count trigger
+Loamcrawlers and Verdelopes, Lavender triggers Nectaris, and so on.
+
+**Permanently blocked (3):**
+- **Crystal Cactus** — needs a `Drought` event. Level 2 schedules only Rain.
+- **Phoenix Bloom** — needs an `Ash Eclipse` event. Not scheduled.
+- **Bloodbloom** — needs the `Rhizorends` animal (see the data bug below).
+
+### [?] Data bug in their files, worth 1 species (~20M)
+
+`Rhizorends` requires `count(species_group=["Shallow-root Species"]) >= 25`, but
+`classifications.json` spells that group **`"Shallowroot Species"`** — no hyphen.
+(`"Deep-root Species"` *is* hyphenated and matches fine, so this looks like a
+typo on their side rather than a convention.)
+
+- If their engine matches exactly, Rhizorends never appears and Bloodbloom is
+  blocked -> **28 species**.
+- If it normalises, Rhizorends appears -> **29 species**.
+
+Cheap to settle: plant 25+ shallow-root plants and check whether Bloodbloom
+becomes placeable. Not worth blocking on.
+
+## The constraint that reshapes the schedule
+
+**Manual placement can no longer fill the grid.** This is the structural
+difference from Level 1:
+
+| | placements | coverage reachable |
+|---|---|---|
+| ticks 401-499 (virgin cells live ~100 ticks) | 1980 | 0.286 |
+| ticks 301-499 (only if dead-matter 0.5 drain is real) | 3980 | 0.571 |
+| coverage ceiling | — | **0.8764** |
+
+In Level 1, 1980 placements against 1800 usable cells meant we could hand-place
+every cell and ignore spread. Here 1980 placements face 6135 cells. **Spread is
+mandatory**, so the spread model we never validated is now load-bearing.
+
+## Consequent shape of a Level 2 schedule
+
+Two phases, because unlocking and scoring want opposite things:
+
+1. **Scaffolding, ticks ~0-400.** Build coverage of the chain plants to trigger
+   the animals and walk the unlock graph. These plants are *disposable* — they
+   die around 100 ticks after planting and contribute nothing to the final
+   score. Their only job is to satisfy thresholds.
+2. **Final garden, ticks ~400-499.** Plant the scoring garden: as many of the 28
+   species as possible, balanced, seeded so spread fills the grid and everything
+   is alive at tick 500.
+
+Open question that decides phase 1's budget: do unlocks, once achieved, **stay**
+unlocked when coverage later falls? The conditions read as live predicates
+("Checks whether a species exists"), which suggests they may re-lock. If they
+re-lock, the scaffolding must survive to tick 500 and competes with the garden
+for space — a much harder problem. **Test this early; it changes the entire
+structure.**
+
+## Level 1 hard-won facts that carry over
+
+- Placements land exactly as written; the danger is the **tail** between the last
+  placement and scoring, during which mature plants overwrite lower-ranked
+  neighbours strictly by `invasiveness_rank`.
+- Giving an aggressive species less territory limits its spread frontier.
+- `alpha = 1`, `k = 1`, leaderboard constant `1e9`, `N = 31`.
