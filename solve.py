@@ -23,9 +23,7 @@ def load(path):
 # ============================ REPLACE FROM HERE ============================
 DATA = pathlib.Path(__file__).parent / "resources-docs"
 
-# Level 1 unlocked species, ordered by invasiveness_rank ASCENDING, then by
-# time_to_maturity DESCENDING (a faster-maturing plant is the bigger threat
-# over any given window, so it is placed later and gets less time to act).
+# Level 1 unlocked species, in placement order (earliest window first).
 #
 #   index  name              rank  maturity  spread_rate
 #   1      Grass              1      1          2
@@ -33,30 +31,100 @@ DATA = pathlib.Path(__file__).parent / "resources-docs"
 #   6      Lavender           2      4          3
 #   5      Dwarf Sunflower    4      5          4
 #   12     Oak Tree          10     20          7
-PLACEMENT_ORDER = [1, 2, 6, 5, 12]
+#
+# This order is measured, not reasoned. The first version of this file ordered
+# by ascending invasiveness_rank on the theory that the most aggressive species
+# should get the least time to displace a neighbour. Sweeping all 120
+# orderings through the simulator across the whole rule matrix killed that
+# theory: what actually matters is EXPOSURE TIME, not rank. The species planted
+# earliest has the most ticks to spread, so the question is which species does
+# the most damage per tick of exposure -- and that is Grass, which matures in a
+# single tick, despite having the LOWEST invasiveness rank in the catalogue.
+#
+# Every one of the top 10 orderings plants Grass last; every one of the bottom
+# three plants it first or second. Worst case across the rule matrix went from
+# 0.0023 (rank order) to 0.1073 (this order), a 47x improvement, and mean from
+# 0.1985 to 0.2392. Reproduce with:
+#     python experiments/sweep_order.py 'resources-docs/1(1).json' --full
+PLACEMENT_ORDER = [12, 2, 6, 5, 1]
 
-# Per-species placement window (first_tick, last_tick), 20 placements per tick.
-# 18 ticks x 20 = 360 cells each = 1800 = every usable cell on the Level 1 map.
+# Placement span. Nutrients set the start: a cell holds 100 and drains 1/tick,
+# so a plant placed at tick t is alive at tick 500 only if t > 400. Nothing is
+# placed before 401, and the last placement lands at 498.
 #
-# Two constraints set these windows:
-#   - Nutrients. A cell holds 100 and drains 1/tick, so a plant placed at tick
-#     t is still alive at tick 500 only if t > 400. Everything starts at 401.
-#   - Invasiveness. A plant that matures can push into an occupied neighbour,
-#     so the most invasive species are placed last and given least time. Oak
-#     starts at 481: maturity 20 means it matures at 501+, i.e. never within
-#     the scored run. It casts no shade, never spreads and displaces nothing,
-#     but still counts toward both species entropy and coverage.
-#
-# These are the optimiser's main knobs. Keep them here, not inline.
-WINDOWS = {
-    1:  (401, 418),   # Grass           rank 1, displaces nothing
-    2:  (419, 436),   # Rose Bush       rank 2
-    6:  (437, 454),   # Lavender        rank 2, matures faster than Rose
-    5:  (455, 472),   # Dwarf Sunflower rank 4, top active displacer
-    12: (481, 498),   # Oak Tree        rank 10, inert by construction
-}
+# Each species gets a consecutive block of ticks inside this span, sized to its
+# seed count, handed out in PLACEMENT_ORDER and packed against the END of the
+# span. Packing late matters: every tick a species is in the ground before 500
+# is a tick it can spread, so the whole schedule is pushed as late as the
+# 20-per-tick cap allows.
+FIRST_TICK = 401
+LAST_TICK = 498
 
 PER_TICK_CAP = 20
+
+# How many cells each species is SEEDED with, as a share of the usable area.
+#
+# Equal shares are the wrong target. The entropy term wants the five species
+# equal at tick 500, but between planting and scoring they spread into and over
+# each other at very different rates, so equal seeding does not produce an equal
+# finish. Sunflower roughly doubles its area; Rose Bush loses most of its own.
+#
+# These weights pre-compensate for that drift: each species is seeded in inverse
+# proportion to how much it gains. They are fitted against the simulator by a
+# deterministic feedback loop, over the whole rule matrix rather than one
+# reading, so they are a compromise across the readings rather than tuned to a
+# guess. Refit with:
+#     python experiments/fit_seeds.py 'resources-docs/1(1).json'
+#
+# Solving itself stays simulation-free and fast, which keeps solve.py trivially
+# reproducible under platform rule 6.
+SEED_WEIGHTS = {
+    12: 0.126,   # Oak Tree         matures and spreads; needs fewer seeds
+    2:  0.227,   # Rose Bush        loses ground; needs more
+    6:  0.307,   # Lavender         loses the most; needs the most
+    5:  0.144,   # Dwarf Sunflower  roughly doubles its area; needs fewest
+    1:  0.195,   # Grass            planted last, so close to break-even
+}
+
+
+def seed_counts(total):
+    """Integer seed counts per species, summing to exactly `total`.
+
+    Largest-remainder apportionment, ties broken by plant index so the result
+    does not depend on dict or float ordering.
+    """
+    raw = {s: SEED_WEIGHTS[s] * total for s in PLACEMENT_ORDER}
+    counts = {s: int(raw[s]) for s in PLACEMENT_ORDER}
+    short = total - sum(counts.values())
+    for s in sorted(PLACEMENT_ORDER, key=lambda x: (-(raw[x] - counts[x]), x)):
+        if short <= 0:
+            break
+        counts[s] += 1
+        short -= 1
+    return counts
+
+
+def tick_windows(sizes):
+    """Consecutive tick block per species, sized to its seed count.
+
+    Blocks are laid out in PLACEMENT_ORDER and packed against LAST_TICK, so the
+    species planted last finishes as close to scoring as possible. Raises if the
+    span cannot hold the requested cells at the per-tick cap, rather than
+    silently dropping placements.
+    """
+    needed = {s: -(-sizes[s] // PER_TICK_CAP) for s in PLACEMENT_ORDER}
+    total = sum(needed.values())
+    start = LAST_TICK + 1 - total
+    if start < FIRST_TICK:
+        raise ValueError(
+            f"{sum(sizes.values())} cells need {total} ticks; span "
+            f"{FIRST_TICK}..{LAST_TICK} holds {LAST_TICK - FIRST_TICK + 1}"
+        )
+    windows, tick = {}, start
+    for species in PLACEMENT_ORDER:
+        windows[species] = (tick, tick + needed[species] - 1)
+        tick += needed[species]
+    return windows
 
 
 def load_plants():
@@ -91,8 +159,8 @@ def usable_cells(world, terrain, soil, preferred):
     ]
 
 
-def partition(cells, n_regions):
-    """Split `cells` into `n_regions` compact, connected regions of equal size.
+def partition(cells, sizes):
+    """Split `cells` into compact, connected regions of the given `sizes`.
 
     Compactness is the point: a species surrounded by its own kind has contested
     edges only on its perimeter, so the fewer and shorter those borders, the
@@ -100,15 +168,15 @@ def partition(cells, n_regions):
     connected component even under Von Neumann adjacency, so there is no
     geographic quarantine available and this is the next best thing.
 
-    Regions are grown one at a time, each taking exactly `target` cells by BFS
+    Regions are grown one at a time, each taking exactly `sizes[i]` cells by BFS
     from the most remote remaining cell. Growing sequentially rather than
-    concurrently guarantees the exact sizes the entropy term wants, and equal
-    sizes matter more than perfectly even borders. Fully deterministic: every
-    candidate list is sorted before a choice is made.
+    concurrently guarantees exact sizes, and exact sizes are what the entropy
+    term is built on. Fully deterministic: every candidate list is sorted before
+    a choice is made.
     """
     order = sorted(cells)
     remaining = set(order)
-    target = len(cells) // n_regions
+    n_regions = len(sizes)
     regions = []
 
     def neighbours(cell):
@@ -117,6 +185,7 @@ def partition(cells, n_regions):
 
     for region_i in range(n_regions):
         pool = sorted(remaining)
+        target = sizes[region_i]
         if region_i == n_regions - 1:
             regions.append(pool)       # last region takes the remainder
             break
@@ -200,24 +269,16 @@ def solve(world, level=None):
     preferred = plants[PLACEMENT_ORDER[0]]["preferred_soil"]
     cells = usable_cells(world, terrain, soil, preferred)
 
-    regions = partition(cells, len(PLACEMENT_ORDER))
-    border = isolation_scores(regions)
-
-    # Most invasive species -> most self-contained region, as insurance in case
-    # the "Oak never matures" timing assumption is off by a tick.
-    by_isolation = sorted(range(len(regions)), key=lambda i: (border[i], i))
-    by_threat = sorted(
-        PLACEMENT_ORDER,
-        key=lambda idx: (-plants[idx]["growth"]["invasiveness_rank"], idx),
-    )
-    assignment = {sp: by_isolation[n] for n, sp in enumerate(by_threat)}
+    sizes = seed_counts(len(cells))
+    regions = partition(cells, [sizes[s] for s in PLACEMENT_ORDER])
+    windows = tick_windows(sizes)
 
     # tick -> list of placements, built in PLACEMENT_ORDER so the per-tick cap
     # is never contested between species.
     by_tick = {}
-    for species in PLACEMENT_ORDER:
-        first, last = WINDOWS[species]
-        region = regions[assignment[species]]
+    for region_i, species in enumerate(PLACEMENT_ORDER):
+        first, last = windows[species]
+        region = regions[region_i]
         tick = first
         for n, (r, c) in enumerate(region):
             tick = first + n // PER_TICK_CAP
