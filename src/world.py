@@ -138,6 +138,10 @@ class World:
     commands: tuple[Mapping[str, Any], ...] = ()
     initial_season: str = "Spring"
     path: str = ""
+    #: ``{"type":"event","tick":250,"event":"Rain"}`` entries, sorted by tick.
+    #: An event "has transpired at least once" from its tick onwards, so the
+    #: unlock leaf that reads it latches - see :mod:`src.animals`.
+    event_schedule: tuple[tuple[int, str], ...] = ()
 
     # cached season lookup table, built lazily
     _season_by_tick: list[str] | None = field(default=None, repr=False, compare=False)
@@ -171,6 +175,21 @@ class World:
                 j += 1
             table.append(season)
         self._season_by_tick = table
+        return table
+
+    def events_by_tick(self, n_ticks: int | None = None) -> list[tuple[str, ...]]:
+        """Per tick, the events that have transpired up to and including it."""
+        n = self.ticks if n_ticks is None else n_ticks
+        table: list[tuple[str, ...]] = []
+        seen: list[str] = []
+        sched = list(self.event_schedule)
+        j = 0
+        for t in range(n):
+            while j < len(sched) and sched[j][0] <= t:
+                if sched[j][1] not in seen:
+                    seen.append(sched[j][1])
+                j += 1
+            table.append(tuple(sorted(seen)))
         return table
 
     @property
@@ -219,6 +238,14 @@ def load_world(path: str, initial_season: str = "Spring") -> World:
         ),
         key=lambda x: x[0],
     )
+    events = sorted(
+        (
+            (int(c["tick"]), str(c["event"]))
+            for c in commands
+            if str(c.get("type", "")) == "event"
+        ),
+        key=lambda x: (x[0], x[1]),
+    )
 
     return World(
         rows=rows,
@@ -231,4 +258,5 @@ def load_world(path: str, initial_season: str = "Spring") -> World:
         commands=commands,
         initial_season=initial_season,
         path=path,
+        event_schedule=tuple(events),
     )
