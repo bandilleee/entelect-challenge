@@ -34,6 +34,9 @@ jobs:
       - name: Unlock-closure invariant
         run: python experiments/closure.py 'resources-docs/1(1).json' | head -20
 
+      - name: Tests
+        run: python -m pytest tests/ -q
+
       - name: Solve, verify, score
         run: ./benchmarks/run.sh | tee /tmp/scores.txt
 

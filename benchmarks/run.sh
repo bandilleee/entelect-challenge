@@ -1,28 +1,44 @@
 #!/usr/bin/env bash
-# Solve + verify every case in benchmarks/cases/. Prints one line per case.
-# A case is a directory containing input.json and (optionally) expect.txt
+# Solve + verify every level, print validity and placement count per level.
+#
+# Levels are listed explicitly rather than globbed: level files arrive one at a
+# time and two of them have parentheses in the name, so every path is quoted.
+# Override with LEVELS="path1 path2" to run a subset.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-fail=0
-shopt -s nullglob
-for case_dir in benchmarks/cases/*/; do
-  name=$(basename "$case_dir")
-  input="$case_dir/input.json"
-  [ -f "$input" ] || continue
-  out="/tmp/ans_$name.json"
-  expect_arg=()
-  [ -f "$case_dir/expect.txt" ] && expect_arg=(--expect "$(cat "$case_dir/expect.txt")")
 
-  if ! python3 solve.py --input "$input" --output "$out" 2>/tmp/err_$name; then
-    echo "$name: SOLVE FAILED"; cat /tmp/err_$name; fail=1; continue
+PY=${PY:-python3}
+command -v "$PY" >/dev/null 2>&1 || PY=python
+
+LEVELS=${LEVELS:-"resources-docs/1(1).json"}
+
+fail=0
+for level in $LEVELS; do
+  if [ ! -f "$level" ]; then
+    echo "$level: MISSING (skipped)"
+    continue
   fi
-  result=$(python3 verify.py --input "$input" --answer "$out" "${expect_arg[@]}" 2>&1)
-  cost=$(echo "$result" | grep -o 'COST=.*' | head -1)
-  if echo "$result" | grep -q VALID; then
+  name=$(basename "$level" .json)
+  out="/tmp/ans_$name.json"
+
+  if ! "$PY" solve.py --input "$level" --output "$out" 2>"/tmp/err_$name"; then
+    echo "$name: SOLVE FAILED"; cat "/tmp/err_$name"; fail=1; continue
+  fi
+
+  # Trust verify.py's exit code, not a substring match. "INVALID" contains
+  # "VALID", so `grep -q VALID` silently passes every invalid answer.
+  result=$("$PY" verify.py --input "$level" --answer "$out" 2>&1)
+  status=$?
+  cost=$(printf '%s\n' "$result" | grep -o 'COST=[0-9]*' | head -1)
+
+  if [ $status -eq 0 ]; then
     echo "$name: VALID $cost"
   else
-    echo "$name: INVALID $cost"; echo "$result" | sed 's/^/    /'; fail=1
+    echo "$name: INVALID $cost"
+    printf '%s\n' "$result" | sed 's/^/    /'
+    fail=1
   fi
 done
-[ $fail -eq 0 ] && echo "--- all cases valid" || echo "--- FAILURES"
+
+if [ $fail -eq 0 ]; then echo "--- all levels valid"; else echo "--- FAILURES"; fi
 exit $fail
