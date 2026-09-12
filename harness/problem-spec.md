@@ -66,9 +66,10 @@ leaderboard.
 2. **`C_max` counts unplantable cells.** 2500 here, of which only 1800 can ever
    hold a plant, so the sample-size factor is capped at `0.72^alpha`. **[V]**
 3. **Entropy wants exactly equal proportions.** Five species at 360 cells each.
-   Grass is the fastest spreader in the catalogue and will drive the grid to a
-   monoculture, taking H toward zero. **Restraining Grass is a scoring
-   objective, not a detail.**
+   Any species that runs away toward a monoculture drives H toward zero, so
+   **containment is a scoring objective, not a detail.** See the competition
+   note below for *which* species is actually the runaway risk — it is not the
+   obvious one.
 
 ## Hard constraints
 
@@ -144,11 +145,21 @@ None of the five has `conditional_modifiers`. **[V]**
   `log_31(5) -> log_31(4)`, i.e. 0.469 -> 0.404.
 - **Rose Bush and Lavender cannot spread in Winter**, which is ticks 300-400. The
   final 100 ticks are Spring — exactly the window that matters.
-- **Competition resolution:** the PDF states plainly that when two plants spread
-  into the same cell, **the one that spreads in last wins**, because neither is
-  mature at that moment, so invasiveness rank does not apply. This appears to
-  contradict the rank system described one page earlier. **[?] Resolve
-  empirically — it governs every contested cell.**
+- **Competition resolution — the two rules are not in conflict. [?]** The PDF
+  looks self-contradictory (p.6 "higher rank wins" vs p.13 "last to spread in
+  wins"), but the p.13 text carries its own reconciliation: *"since neither
+  plant has reached maturity at that point"*. Best reading:
+  - two **seedlings** landing in the same **empty** cell on the same tick ->
+    neither is mature, rank cannot apply, **last one in wins**;
+  - a **mature** plant pushing into an **occupied** cell -> **invasiveness rank
+    decides**.
+  This is the highest-priority rule to test, because it inverts the threat
+  model. **Grass has `invasiveness_rank: 1` — the lowest of all 31 plants**
+  (Rose Bush 2, Lavender 2, Dwarf Sunflower 4, Oak 10). Under this reading Grass
+  can fill empty cells fast but can **displace nothing**, while **Oak
+  outcompetes all four of the others**. The runaway monoculture risk is
+  therefore **Oak, not Grass** — which also compounds with Oak's radius-4 shade
+  killing Grass outright. Plan containment around Oak first.
 - **20 placements/tick over ticks 400-499 is 2000 placements against 1800 usable
   cells.** Manual placement alone can nearly fill the grid. Spread is an
   accelerant, not a necessity — a useful fallback if spread modelling proves
@@ -191,10 +202,49 @@ term. **Highest-value uncertain item in the spec. Test it in isolation, early.**
 8. Does `spread_rate` count from planting or from maturity?
 9. Is the submission key `plant_index` or `index`?
 
-## Submission mechanics
+## Submission mechanics — confirmed off the platform
 
-**Not yet confirmed — read off the platform, not the write-up.** `make_submit.py`
-zips from `git archive`, so uncommitted work is silently absent.
+- Upload is **per level** (tabs for Levels 1-4). Level 1 requires **both a ZIP
+  (source) and a JSON (answer)**; the SUBMIT button stays disabled until both
+  are attached. `make_submit.py --level 1` already emits exactly this pair.
+- **"You can upload multiple versions and manage your submissions below."** No
+  per-day cap is stated — only the deadline. **Treat submissions as
+  effectively unlimited.** That makes cheap diagnostic submissions worthwhile:
+  a calibration ladder costs us nothing but wall-clock.
+  - **[?] Unconfirmed: does the leaderboard take our best submission or our
+    latest?** If latest, a near-zero diagnostic submission temporarily tanks the
+    visible score. Recoverable by resubmitting, but check before firing one.
+  - **[?] Unconfirmed: does the platform return a score immediately on upload?**
+    The whole calibration plan depends on it. Verify on submission #1.
+- Platform's own Level 1 spec: "World Size 50 x 50 / Ticks 500 / Included:
+  Seasons, **no animals, no weather conditions**." This **independently confirms
+  the five-species closure** — no animals and no events means no unlock branch
+  is enterable.
+
+### Solution Validation — a hard constraint on the optimiser
+
+Platform rule 6: *"All solutions need to be deterministic and reproducible. The
+solution must produce the same output each time when given the same input."*
+Entelect validate submitted solutions, and we ship our source in the ZIP.
+
+**So `solve.py --input <level>.json --output answer.json` must emit a
+byte-identical answer on every run, on their machine as well as ours.** This is
+an architectural constraint, not a style preference:
+
+- Seed every RNG explicitly (`random`, `numpy.random`). No unseeded sampling.
+- **Search must be iteration-bounded, never wall-clock-bounded.** A "run for 60
+  seconds" budget produces different answers on different hardware and fails
+  rule 6 outright.
+- **Beware `PYTHONHASHSEED`.** Iteration order over a `set` of strings is not
+  stable across Python processes. Sort before iterating anywhere the order can
+  reach the output — tie-breaks in competition resolution and spread order are
+  the obvious places.
+- No multiprocessing result-ordering dependence.
+- Rule 3: submissions are plagiarism-checked. All code is our own.
+- Rule 2: individual competition — no team formation.
+
+`make_submit.py` zips from `git archive`, so uncommitted work is silently
+absent from the ZIP.
 
 ---
 ## Classification

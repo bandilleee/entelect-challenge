@@ -25,7 +25,13 @@ risk is in reconstructing their simulator, not in the search.
 - **Grid 50x50 = 2500 cells; only 1800 are plantable** (dirt 1440 + mud 360).
   Clay (360) is unusable — no starter has soil 2 in `preferred_soil`. Water 180,
   stone 160. Max coverage = **0.72**.
-- Seasons: Summer@100, Autumn@200, Winter@300, Spring@400. No events.
+- Seasons: Summer@100, Autumn@200, Winter@300, Spring@400. No events. The
+  platform's own Level 1 blurb ("Seasons, no animals, no weather conditions")
+  independently confirms this.
+- **Grass has the LOWEST invasiveness rank (1) of all 31 plants; Oak has 10.**
+  If rank governs pushing into occupied cells, Grass displaces nothing and
+  **Oak is the monoculture risk**, not Grass. Test this first — it inverts the
+  containment plan.
 - **Nutrients cap plant life at ~100 ticks in a virgin cell.** Scoring reads the
   final tick, so anything planted before ~tick 400 is likely dead at scoring
   time. This is the central trap.
@@ -37,6 +43,21 @@ risk is in reconstructing their simulator, not in the search.
 | L1 | — | — | — | — |
 
 Nothing measured yet.
+
+## Submission mechanics (confirmed off the platform)
+
+- Per-level upload; Level 1 needs **both a ZIP (source) and a JSON (answer)**.
+  `make_submit.py --level 1` already produces exactly that pair.
+- **"You can upload multiple versions"** — no per-day cap, only the deadline.
+  Treat submissions as **effectively unlimited**, so cheap diagnostic
+  submissions are worth firing.
+- **Platform rule 6: solutions must be deterministic and reproducible.**
+  `solve.py` must emit a byte-identical answer every run, on their machine too.
+  Seed all RNG; make search **iteration-bounded, never wall-clock-bounded**;
+  sort before iterating any set of strings (`PYTHONHASHSEED` is not stable
+  across processes). This is an architectural constraint on the optimiser.
+- Still unknown: does the leaderboard take best-or-latest, and does the platform
+  return a score immediately on upload? Confirm both on submission #1.
 
 ## In flight
 
