@@ -64,26 +64,35 @@ PER_TICK_CAP = 20
 
 # How many cells each species is SEEDED with, as a share of the usable area.
 #
-# Equal shares are the wrong target. The entropy term wants the five species
-# equal at tick 500, but between planting and scoring they spread into and over
-# each other at very different rates, so equal seeding does not produce an equal
-# finish. Sunflower roughly doubles its area; Rose Bush loses most of its own.
+# EQUAL. This was not always so, and the correction is the single most
+# instructive thing we have learned.
 #
-# These weights pre-compensate for that drift: each species is seeded in inverse
-# proportion to how much it gains. They are fitted against the simulator by a
-# deterministic feedback loop, over the whole rule matrix rather than one
-# reading, so they are a compromise across the readings rather than tuned to a
-# guess. Refit with:
-#     python experiments/fit_seeds.py 'resources-docs/1(1).json'
+# The first submission seeded unequally (Oak 227 ... Lavender 553) to
+# pre-compensate for drift our simulator predicted: it expected Sunflower to
+# roughly double and Lavender to lose half. The engine's evaluation log came
+# back with the final counts, and the drift did not happen:
 #
-# Solving itself stays simulation-free and fast, which keeps solve.py trivially
-# reproducible under platform rule 6.
+#     species      we placed   engine final   delta
+#     Oak Tree           227            227      +0
+#     Rose Bush          409            409      +0
+#     Dwarf Sunflower    260            260      +0
+#     Lavender           553            563     +10
+#     Grass              351            341     -10
+#
+# Three of five species finished at EXACTLY the placed count. For a schedule
+# that fills every usable cell, the engine's final grid is essentially our
+# placement list -- there is no room left to spread into, so spread barely
+# happens. The pre-compensation was therefore correcting for nothing, and it
+# cost real entropy: H came back 0.4531 against a 0.4687 ceiling.
+#
+# Equal seeding puts H back at the ceiling. Measured against the engine, not
+# against our simulator.
 SEED_WEIGHTS = {
-    12: 0.126,   # Oak Tree         matures and spreads; needs fewer seeds
-    2:  0.227,   # Rose Bush        loses ground; needs more
-    6:  0.307,   # Lavender         loses the most; needs the most
-    5:  0.144,   # Dwarf Sunflower  roughly doubles its area; needs fewest
-    1:  0.195,   # Grass            planted last, so close to break-even
+    12: 0.200,   # Oak Tree
+    2:  0.200,   # Rose Bush
+    6:  0.200,   # Lavender
+    5:  0.200,   # Dwarf Sunflower
+    1:  0.200,   # Grass
 }
 
 
@@ -114,13 +123,16 @@ def tick_windows(sizes):
     """
     needed = {s: -(-sizes[s] // PER_TICK_CAP) for s in PLACEMENT_ORDER}
     total = sum(needed.values())
-    start = LAST_TICK + 1 - total
-    if start < FIRST_TICK:
+    if total > LAST_TICK - FIRST_TICK + 1:
         raise ValueError(
             f"{sum(sizes.values())} cells need {total} ticks; span "
             f"{FIRST_TICK}..{LAST_TICK} holds {LAST_TICK - FIRST_TICK + 1}"
         )
-    windows, tick = {}, start
+    # Packed against the START of the span. The scoring parameters are now known
+    # to be alpha = k = 1 exactly, so the longevity term is linear in lifespan:
+    # every tick a cell is planted earlier is worth the same again. Nutrients
+    # stop us going earlier than FIRST_TICK, so we sit right on that bound.
+    windows, tick = {}, FIRST_TICK
     for species in PLACEMENT_ORDER:
         windows[species] = (tick, tick + needed[species] - 1)
         tick += needed[species]
